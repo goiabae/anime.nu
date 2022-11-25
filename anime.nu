@@ -162,6 +162,13 @@ def get_video_quality_mp4 [links] {
   }
 }
 
+def 'from http/2' [] {
+  let header_lines = ($in | lines)
+  let spec_version = ($header_lines | first | parse "HTTP/{version} {status}" | first)
+  let key_value_pairs = ($header_lines | skip | parse '{key}: {value}')
+  {spec: $spec_version, kv-pairs: $key_value_pairs}
+}
+
 def get_video_link [dpage_url] {
   let id = ($dpage_url | url query | parse-url-query $in | get id)
   let response = (
@@ -173,8 +180,19 @@ def get_video_link [dpage_url] {
   print $"Fetching ($provider_name) Direct link.."
   let refr = $base_url
   let enc_id = ($id | encode base64 | str trim -r -c '=')
-  let ani_id = ($"($id)LTXs3GrU8we9O($enc_id)" | encode base64 | str trim -r -c '=')
-  let result_links = (curl -Is -A $agent $"($base_url)/api/cW9($ani_id)" | sed -nE 's_[L|l]ocation: https?://[^#]*#([^#]*).*_\1_p' | decode base64)
+  let ani_id = (
+    $"($id)LTXs3GrU8we9O($enc_id)" | encode base64 | str trim -r -c '='
+  )
+  let response2_headers = (curl -Is -A $agent $"($base_url)/api/cW9($ani_id)" | from http/2)
+  let location = ($response2_headers.kv-pairs | where key == location | first | get value)
+  let response2 = (
+    let a = ($location | split row '#')
+  ; let url = ($a | first)
+  ; let hash = ($a | get 1)
+  ; let key_value_pairs = ($a | skip 2 | split column '=' | rename key value)
+  ; {url: $url, hash: $hash, kv-pairs: $key_value_pairs}
+  )
+  let result_links = ($response2.hash | decode base64)
   if $result_links =~ m3u8 {
     get_video_quality_m3u8 $result_links $dpage_url
   } else {
