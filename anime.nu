@@ -66,6 +66,9 @@ def search_anime [query: string] {
   }
 }
 
+# TODO
+def 'from m3u8' [] {}
+
 def get_video_quality_m3u8 [links, dpage_url] {
   if $links =~ manifest { $links } else {
     let m3u8_links = (curl -s -A $agent --referer $dpage_url $links | str trim -r | lines)
@@ -189,7 +192,7 @@ def main [] {
   let episodes = (echo $results | get $selection | episode_list $in | reject eptotal | rotate | get column0)
 
   print -n $'Select index [1-($episodes | length)]: '
-  let selected_ep = (read-line | into int)
+  let selected_ep = (read-line | into int | $in - 1)
 
   open_episode ($results | get $selection) $selected_ep $episodes
 }
