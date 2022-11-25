@@ -6,6 +6,12 @@ def print-out [-t, name, value] {
   if $t { exit 0 }
 }
 
+def sort-by-inner [path: list, --name (-n): string = '_tmp'] {
+  let t = ($in)
+  let column = ($path | reduce -f $t { |it, acc| $acc | get $it } | wrap $name)
+  $t | merge $column | sort-by $name | reject $name
+}
+
 let agent = "Mozilla/5.0 (X11; Linux x86_64; rv:99.0) Gecko/20100101 Firefox/100.0"
 let base_url = "https://animixplay.to"
 let gogohd_url = "https://gogohd.net"
@@ -66,50 +72,85 @@ def search_anime [query: string] {
   }
 }
 
-# TODO
-def 'from m3u8' [] {}
+def 'from m3u8' [] {
+  let lines = ($in | lines)
+  $lines
+  | each -n { |it|
+      if not ($it.item | str starts-with '#') {
+        $nothing
+      } else {
+        $it.item
+        | split column ':'
+        | first
+        | rename keyword value
+        | insert url (
+            if ($lines | get ($it.index + 1) | str starts-with '#') {
+              $nothing
+            } else {
+              $lines | get ($it.index + 1)
+            }
+        )
+      }
+  }
+  | default $nothing value
+  | each { |it|
+      $it | update keyword ($in.keyword | str replace '#' '')
+  }
+  | each { |it|
+      # TODO maybe parse some more keywords if needed
+      if $it.keyword == 'EXT-X-STREAM-INF' {
+        $it
+        | update value (
+            $it.value
+            | str replace '(".*)(,)(.*")' '${1};${3}'
+            | split row ','
+            | parse '{key}={value}'
+            | each { |it|
+                if $it.key == "RESOLUTION" {
+                  $it | update value ($it.value | parse '{width}x{height}' | first)
+                } else if $it.key == "CODECS" {
+                  $it | update value ($it.value | str trim -c '"' | split row ';')
+                } else $it
+            }
+            | transpose -ir
+        )
+      } else $it
+  }
+  | flatten value
+}
 
 def get_video_quality_m3u8 [links, dpage_url] {
   if $links =~ manifest { $links } else {
-    let m3u8_links = (curl -s -A $agent --referer $dpage_url $links | str trim -r | lines)
-    let m3u8_info = {
-      header: ($m3u8_links | get 0),
-      body: (
-        $m3u8_links
-        | skip
-        | group 2
-        | each { |it|
-            $it.0
-            | parse '#EXT-X-STREAM-INF:PROGRAM-ID={id},BANDWIDTH={bandwidth},RESOLUTION={width}x{height},FRAME-RATE={framerate},CODECS="{codecs}"'
-            | update height ($in.height | into int | get 0)
-            | update width ($in.width | into int | get 0)
-            | update codecs ($in.codecs | split row ',')
-            | insert url $it.1
-        }
-        | flatten
-        | sort-by -r width
-      )
-    }
+    let response = (
+      curl -s -A $agent --referer $dpage_url $links
+      | str trim -r
+    )
+    $response | save /tmp/response.m3u8 # DEBUG
+    let m3u8 = ($response | from m3u8)
+    let resolutions = (
+      $m3u8
+      | where keyword == 'EXT-X-STREAM-INF'
+      | sort-by-inner ['value' 'RESOLUTION' 'width']
+    );
     let res_selector = (
       if $quality == best {
-        $m3u8_info.body | first
+        $resolutions | last
       } else if $quality == worst {
-        $m3u8_info.body | last
+        $resolutions | first
       } else {
-        let tmp = ($m3u8_info.body | where width == $quality)
+        let tmp = ($resolutions | where value.RESOLUTION.width == $quality)
         if ($tmp | length | $in == 0) {
           print "Current video quality is not available (defaulting to best quality)"
-          $m3u8_info.body | first
+          $resolutions | last
         } else $tmp
       }
     )
-    $res_selector.url
+    echo $res_selector
   }
 }
 
 # FIXME haven't tested this yet
 def get_video_quality_mp4 [links] {
-  print-out -t 'links' $links
   if ($quality == best) or ($quality == worst) {
     $links | tail -n 1 | cut -d '>' -f 2
   } else {
@@ -149,13 +190,13 @@ def open_episode [anime: record, selected_episode, episode_paths] {
     exit
   }
   print $'Scraping "($dpage_link)" for video'
-  let video_url = (get_video_link $dpage_link)
-  if ($video_url | str length | $in == 0) {
+  let video = (get_video_link $dpage_link)
+  if ($video | get url | str length | $in == 0) {
     print "Video URL not found"
     exit
   }
   print "Currently playing $trackma_title ($provider_name)"
-  mpv $'--force-media-title=($anime.title) ep ($selected_episode + 1)' $video_url
+  mpv $'--force-media-title=($anime.title) ep ($selected_episode + 1)' $video.url
 }
 
 # Abstraction over read
