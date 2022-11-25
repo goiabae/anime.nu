@@ -155,6 +155,14 @@ def open_episode [anime: record, selected_episode, episode_paths] {
   mpv $'--force-media-title=($anime.title) ep ($selected_episode + 1)' $video_url
 }
 
+# Abstraction over read
+# nushell doesn't have a read like bash. This read program reads a
+# string of characters until a new line and echoes the string without
+# the terminating newline
+def read-line [] {
+  read | str trim
+}
+
 # anime.nu v0.0.1 by goiabae
 def main [] {
   if (version).version != '0.71.0' {
@@ -164,7 +172,7 @@ def main [] {
 
   print 'Search Anime'
   print -n '> '
-  let query = (read | str trim)
+  let query = (read-line)
   print $'Searching query "($query)"'
 
   let results = (search_anime $query)
@@ -176,12 +184,12 @@ def main [] {
   print "Query Results:"
   echo $results
   print -n 'Select index [NUMBER]: '
-  let selection = (read | into int)
+  let selection = (read-line | into int)
 
   let episodes = (echo $results | get $selection | episode_list $in | reject eptotal | rotate | get column0)
 
   print -n $'Select index [1-($episodes | length)]: '
-  let selected_ep = (read | into int)
+  let selected_ep = (read-line | into int)
 
   open_episode ($results | get $selection) $selected_ep $episodes
 }
