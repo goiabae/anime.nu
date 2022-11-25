@@ -2,7 +2,7 @@
 
 def print-out [-t, name, value] {
   print $'DEBUG: ($name) is:'
-  print $value
+  print ($value | to nuon)
   if $t { exit 0 }
 }
 
@@ -12,6 +12,7 @@ def sort-by-inner [path: list, --name (-n): string = '_tmp'] {
   $t | merge $column | sort-by $name | reject $name
 }
 
+let provider = "Animixplay"
 let agent = "Mozilla/5.0 (X11; Linux x86_64; rv:99.0) Gecko/20100101 Firefox/100.0"
 let base_url = "https://animixplay.to"
 let gogohd_url = "https://gogohd.net"
@@ -145,7 +146,11 @@ def get_video_quality_m3u8 [links, dpage_url] {
         } else $tmp
       }
     )
-    echo $res_selector
+    if ($res_selector.url | url scheme | $in == '') {
+      $res_selector | update url (
+        build-string 'https://' ($links | url host) '/' $res_selector.url
+      )
+    } else $res_selector
   }
 }
 
@@ -169,8 +174,9 @@ def 'from http/2' [] {
   {spec: $spec_version, kv-pairs: $key_value_pairs}
 }
 
-def get_video_link [dpage_url] {
-  let id = ($dpage_url | url query | parse-url-query $in | get id)
+def get_video_link [url: string] {
+  let id = ($url | url query | parse-url-query $in | get id)
+  # used for providers other than Animixplay (gogo and xstreamcdn)
   let response = (
     curl -sL -A $agent $"($gogohd_url)/streaming.php?id=($id)"
     | sed -nE -e 's/.*class="container-(.*)">/\1/p' -e 's/.*class="wrapper container-(.*)">/\1/p' -e 's/.*class=".*videocontent-(.*)">/\1/p' -e 's/.*data-value="(.*)">.*/\1/p' -e 's/.*data-status="1".*data-video="(.*)">.*/\1/p'
@@ -194,27 +200,10 @@ def get_video_link [dpage_url] {
   )
   let result_links = ($response2.hash | decode base64)
   if $result_links =~ m3u8 {
-    get_video_quality_m3u8 $result_links $dpage_url
+    get_video_quality_m3u8 $result_links $url
   } else {
     get_video_quality_mp4 $result_links
   }
-}
-
-def open_episode [anime: record, selected_episode, episode_paths] {
-  print $'Loading episode ($selected_episode)'
-  let dpage_link = ($episode_paths | get $selected_episode | 'https:' + $in)
-  if ($dpage_link | str length | $in == 0) {
-    print "Episode doesn't exist!"
-    exit
-  }
-  print $'Scraping "($dpage_link)" for video'
-  let video = (get_video_link $dpage_link)
-  if ($video | get url | str length | $in == 0) {
-    print "Video URL not found"
-    exit
-  }
-  print "Currently playing $trackma_title ($provider_name)"
-  mpv $'--force-media-title=($anime.title) ep ($selected_episode + 1)' $video.url
 }
 
 # Abstraction over read
@@ -222,7 +211,15 @@ def open_episode [anime: record, selected_episode, episode_paths] {
 # string of characters until a new line and echoes the string without
 # the terminating newline
 def read-line [] {
-  read | str trim
+  sh -c 'read RETURN; exec echo "$RETURN"' | str trim -r
+}
+
+def play [--title (-t): string, path: string] {
+  if $title != $nothing {
+    mpv $'--force-media-title=($title)' $path
+  } else {
+    mpv $path
+  }
 }
 
 # anime.nu v0.0.1 by goiabae
@@ -245,13 +242,41 @@ def main [] {
 
   print "Query Results:"
   echo $results
-  print -n 'Select index [NUMBER]: '
+  print -n $'Select index [0-($results | length | $in - 1)]: '
   let selection = (read-line | into int)
 
-  let episodes = (echo $results | get $selection | episode_list $in | reject eptotal | rotate | get column0)
+  if $selection < 0 or $selection > ($results | length | $in - 1) {
+    print 'Invalid table index'
+    exit
+  }
+
+  let anime = ($results | get $selection)
+
+  let episodes = (
+      echo $results
+    | get $selection
+    | episode_list $in
+    | reject eptotal
+    | rotate
+    | get column0
+  )
 
   print -n $'Select index [1-($episodes | length)]: '
-  let selected_ep = (read-line | into int | $in - 1)
+  let episode = (read-line | into int)
+  if $episode < 1 or $episode > ($episodes | length) {
+    print 'Invalid episode number'
+    exit
+  }
 
-  open_episode ($results | get $selection) $selected_ep $episodes
+  let url = ($episodes | get ($episode - 1) | 'https:' + $in)
+
+  print $'Scraping "($url)" for video'
+  let video = (get_video_link $url)
+  if ($video | get url | str length | $in == 0) {
+    print "Video URL not found"
+    exit
+  }
+
+  print $"Currently playing ($anime.title) ($provider)"
+  play --title $'($anime.title) ep ($episode)' $video.url
 }
