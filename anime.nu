@@ -54,17 +54,6 @@ def 'query gogo' [query: string] {
   $release | merge $path | merge $title | merge $image
 }
 
-# def search_anime [query: string] {
-#   let search = ($query | str replace ' ' '-')
-#   let url = $"https://gogoanime.dk/search.html?keyword=($search)"
-#   fetch $url
-#   | query web -a href -q 'ul a'
-#   | where $it =~ /category
-#   | each { |it|
-#       basename $it | str trim
-#   }
-# }
-
 def search_anime [query: string] {
   let search = ($query | str replace ' ' '-')
   query gogo $search
@@ -278,5 +267,5 @@ def main [] {
   }
 
   print $"Currently playing ($anime.title) ($provider)"
-  play --title $'($anime.title) ep ($episode)' $video.url
+  play --title $'($anime.title) - Episode ($episode)' $video.url
 }
