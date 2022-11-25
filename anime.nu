@@ -133,7 +133,12 @@ def open_episode [anime_id, selected_episode, episode_paths] {
   mpv $'--force-media-title=($anime_id) ep ($selected_episode + 1)' $video_url
 }
 
+# anime.nu v0.0.1 by goiabae
 def main [] {
+  if (version).version != '0.71.0' {
+    print 'This script was tested with nushell version 0.71.0.'
+    print 'You may run into issues or crashes when running on a different version'
+  }
 
   print 'Search Anime'
   print -n '> '
