@@ -27,8 +27,8 @@ def parse-url-query [query: string] {
   | get 0
 }
 
-def episode_list [anime: string] {
-  let response = (curl -A $agent -s $'($base_url)/v1/($anime)')
+def episode_list [anime: record] {
+  let response = (curl -A $agent -s $'($base_url)/v1/($anime.path)')
   # print $response
   echo $response
   | query web -q '#epslistplace'
@@ -38,10 +38,32 @@ def episode_list [anime: string] {
   | from json
 }
 
+def 'query gogo' [query: string] {
+  let response = (fetch $'https://gogoanime.dk/search.html?keyword=($query)')
+  let release = ($response | query web -q '.items li .released' | str trim  | parse 'Released: {year}')
+  let path = ($response | query web -m -a href -q '.items li .name a' | wrap path)
+  let title = ($response | query web -m -a title -q '.items li .name a' | wrap title)
+  let image = ($response | query web -m -a src -q '.items li img' | wrap image)
+  $release | merge $path | merge $title | merge $image
+}
+
+# def search_anime [query: string] {
+#   let search = ($query | str replace ' ' '-')
+#   let url = $"https://gogoanime.dk/search.html?keyword=($search)"
+#   fetch $url
+#   | query web -a href -q 'ul a'
+#   | where $it =~ /category
+#   | each { |it|
+#       basename $it | str trim
+#   }
+# }
+
 def search_anime [query: string] {
   let search = ($query | str replace ' ' '-')
-  let url = $"https://gogoanime.dk/search.html?keyword=($search)"
-  fetch $url | query web -a href -q 'ul a' | where $it =~ /category
+  query gogo $search
+  | each { |it|
+    $it | update path ($it.path | path basename)
+  }
 }
 
 def get_video_quality_m3u8 [links, dpage_url] {
@@ -116,7 +138,7 @@ def get_video_link [dpage_url] {
   }
 }
 
-def open_episode [anime_id, selected_episode, episode_paths] {
+def open_episode [anime: record, selected_episode, episode_paths] {
   print $'Loading episode ($selected_episode)'
   let dpage_link = ($episode_paths | get $selected_episode | 'https:' + $in)
   if ($dpage_link | str length | $in == 0) {
@@ -130,7 +152,7 @@ def open_episode [anime_id, selected_episode, episode_paths] {
     exit
   }
   print "Currently playing $trackma_title ($provider_name)"
-  mpv $'--force-media-title=($anime_id) ep ($selected_episode + 1)' $video_url
+  mpv $'--force-media-title=($anime.title) ep ($selected_episode + 1)' $video_url
 }
 
 # anime.nu v0.0.1 by goiabae
@@ -145,12 +167,7 @@ def main [] {
   let query = (read | str trim)
   print $'Searching query "($query)"'
 
-  let results = (
-    search_anime $query
-    | each { |it|
-      basename $it | str trim
-    }
-  )
+  let results = (search_anime $query)
   if ($results | length | $in == 0) {
     print 'No search results found'
     exit
@@ -163,8 +180,7 @@ def main [] {
 
   let episodes = (echo $results | get $selection | episode_list $in | reject eptotal | rotate | get column0)
 
-  echo $episodes
-  print -n 'Select index [NUMBER]: '
+  print -n $'Select index [1-($episodes | length)]: '
   let selected_ep = (read | into int)
 
   open_episode ($results | get $selection) $selected_ep $episodes
